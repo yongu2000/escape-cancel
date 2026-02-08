@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "start": "node src/app.js",
-    "postinstall": "npx playwright install chromium"
+    "postinstall": "npx playwright install"
   },
   "dependencies": {
     "playwright": "^1.47.0",
