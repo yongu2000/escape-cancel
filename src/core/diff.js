@@ -1,9 +1,5 @@
-export async function pickNewSlots(slots, store) {
-  const results = [];
-  for (const s of slots) {
-    if (!(await store.wasSeen(s))) results.push(s);
-  }
-  return results;
+export function pickNewSlots(slots, store) {
+  return slots.filter((s) => !store.wasSeen(s));
 }
 
 export function formatSlotsMessage(siteName, newOnes) {

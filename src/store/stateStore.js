@@ -1,75 +1,74 @@
-import pg from "pg";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
-const { Pool } = pg;
+// ✅ 현재 파일 기준 디렉토리 (__dirname 대체)
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// ✅ 프로젝트 루트/data/state.json
+const STATE_PATH = path.join(__dirname, "..", "..", "data", "state.json");
 
 export class StateStore {
   constructor() {
-    const databaseUrl = process.env.DATABASE_URL;
-    if (!databaseUrl) throw new Error("DATABASE_URL is missing");
-
-    this.pool = new Pool({
-      connectionString: databaseUrl,
-      ssl: { rejectUnauthorized: false }, // Render 내부망이어도 ssl 요구되는 케이스 대비
-    });
+    this.state = { seen: {} };
   }
 
-  async init() {
-    await this.pool.query(`
-      CREATE TABLE IF NOT EXISTS seen_slots (
-        site_key TEXT NOT NULL,
-        slot_key TEXT NOT NULL,
-        first_seen_at BIGINT NOT NULL,
-        last_notified_at BIGINT,
-        PRIMARY KEY (site_key, slot_key)
-      );
-    `);
+  load() {
+    if (fs.existsSync(STATE_PATH)) {
+      this.state = JSON.parse(fs.readFileSync(STATE_PATH, "utf-8"));
+    }
+  }
+
+  save() {
+    fs.mkdirSync(path.dirname(STATE_PATH), { recursive: true });
+    fs.writeFileSync(
+      STATE_PATH,
+      JSON.stringify(this.state, null, 2),
+      "utf-8"
+    );
   }
 
   slotKey(slot) {
     return `${slot.siteKey}|${slot.theme || ""}|${slot.date}|${slot.time}`;
   }
 
-  async wasSeen(slot) {
-    const siteKey = slot.siteKey;
-    const slotKey = this.slotKey(slot);
-
-    const res = await this.pool.query(
-      `SELECT 1 FROM seen_slots WHERE site_key=$1 AND slot_key=$2 LIMIT 1`,
-      [siteKey, slotKey]
-    );
-    return res.rowCount > 0;
-  }
-
-  async markSeen(slot) {
-    const siteKey = slot.siteKey;
-    const slotKey = this.slotKey(slot);
-    const now = Date.now();
-
-    // 이미 있으면 유지, 없으면 insert
-    await this.pool.query(
-      `
-      INSERT INTO seen_slots (site_key, slot_key, first_seen_at)
-      VALUES ($1, $2, $3)
-      ON CONFLICT (site_key, slot_key) DO NOTHING
-      `,
-      [siteKey, slotKey, now]
+  wasSeen(slot) {
+    const k = this.slotKey(slot);
+    return Boolean(
+      this.state.seen &&
+      this.state.seen[slot.siteKey] &&
+      this.state.seen[slot.siteKey][k]
     );
   }
 
-  async markNotified(slot) {
-    const siteKey = slot.siteKey;
-    const slotKey = this.slotKey(slot);
-    const now = Date.now();
+  markSeen(slot) {
+    const k = this.slotKey(slot);
 
-    // 없으면 생성 + last_notified_at 세팅
-    await this.pool.query(
-      `
-      INSERT INTO seen_slots (site_key, slot_key, first_seen_at, last_notified_at)
-      VALUES ($1, $2, $3, $3)
-      ON CONFLICT (site_key, slot_key)
-      DO UPDATE SET last_notified_at = EXCLUDED.last_notified_at
-      `,
-      [siteKey, slotKey, now]
-    );
+    if (!this.state.seen[slot.siteKey]) {
+      this.state.seen[slot.siteKey] = {};
+    }
+
+    if (!this.state.seen[slot.siteKey][k]) {
+      this.state.seen[slot.siteKey][k] = {
+        firstSeenAt: Date.now(),
+      };
+    }
+  }
+
+  markNotified(slot) {
+    const k = this.slotKey(slot);
+
+    if (!this.state.seen[slot.siteKey]) {
+      this.state.seen[slot.siteKey] = {};
+    }
+
+    if (!this.state.seen[slot.siteKey][k]) {
+      this.state.seen[slot.siteKey][k] = {
+        firstSeenAt: Date.now(),
+      };
+    }
+
+    this.state.seen[slot.siteKey][k].lastNotifiedAt = Date.now();
   }
 }
